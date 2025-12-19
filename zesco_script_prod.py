@@ -189,7 +189,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT date, time, event, reboot_type, ip_address,
-                       outage_duration, rapid_cycle, uptime_seconds
+                       outage_duration, rapid_cycle, uptime_seconds, metadata
                 FROM power_events
                 WHERE date >= date('now', ?)
                 ORDER BY date DESC, time DESC
@@ -206,7 +206,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT date, time, event, reboot_type, ip_address,
-                       outage_duration, rapid_cycle, uptime_seconds
+                       outage_duration, rapid_cycle, uptime_seconds, metadata
                 FROM power_events
                 ORDER BY date DESC, time DESC
             """)
@@ -440,23 +440,39 @@ class PowerAnalytics:
         self.today_str = datetime.now().strftime('%Y-%m-%d')
     
     def _load_events(self) -> List[Dict]:
-        """Load events from database"""
+        """Load events from database with parsed metadata"""
         try:
-            return self.db_manager.get_recent_events(days=30)
+            events = self.db_manager.get_recent_events(days=30)
+            # Parse metadata to get actual outage seconds
+            parsed_events = []
+            for event in events:
+                parsed_event = dict(event)
+                metadata = event.get('metadata')
+                if metadata:
+                    try:
+                        metadata_dict = json.loads(metadata)
+                        parsed_event['actual_outage_seconds'] = metadata_dict.get('actual_outage_seconds', 0.0)
+                    except (json.JSONDecodeError, TypeError):
+                        parsed_event['actual_outage_seconds'] = 0.0
+                else:
+                    parsed_event['actual_outage_seconds'] = 0.0
+                parsed_events.append(parsed_event)
+            return parsed_events
         except Exception as e:
             logger.error(f"Error loading events: {e}")
             return []
     
     def calculate_average_outage(self) -> Tuple[float, str]:
-        """Calculate average outage duration"""
+        """Calculate average outage duration using actual outage seconds"""
         if not self.events:
             return 0.0, "No historical data"
         
         outages = []
         for event in self.events:
-            uptime = event.get('uptime_seconds')
-            if uptime and float(uptime) > 0:
-                outages.append(float(uptime))
+            # Use actual_outage_seconds from parsed metadata
+            outage_seconds = event.get('actual_outage_seconds', 0.0)
+            if outage_seconds and float(outage_seconds) > 0:
+                outages.append(float(outage_seconds))
         
         if not outages:
             return 0.0, "No outage data"
@@ -465,14 +481,15 @@ class PowerAnalytics:
         return avg_seconds, self._format_duration(avg_seconds)
     
     def calculate_today_downtime(self) -> Tuple[float, str]:
-        """Calculate total downtime for today"""
+        """Calculate total downtime for today using actual outage seconds"""
         total_seconds = 0.0
         
         for event in self.events:
             if event.get('date') == self.today_str:
-                uptime = event.get('uptime_seconds')
-                if uptime:
-                    total_seconds += float(uptime)
+                # Use actual_outage_seconds from parsed metadata
+                outage_seconds = event.get('actual_outage_seconds', 0.0)
+                if outage_seconds:
+                    total_seconds += float(outage_seconds)
         
         return total_seconds, self._format_duration(total_seconds)
     
@@ -992,14 +1009,23 @@ class PowerMonitor:
             with self.db_manager._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT date, time, event, uptime_seconds 
+                    SELECT date, time, event, uptime_seconds, metadata
                     FROM power_events 
                     ORDER BY created_at DESC 
                     LIMIT 1
                 """)
                 row = cursor.fetchone()
                 if row:
-                    return dict(row)
+                    event_dict = dict(row)
+                    # Parse metadata if exists
+                    metadata = event_dict.get('metadata')
+                    if metadata:
+                        try:
+                            metadata_dict = json.loads(metadata)
+                            event_dict['actual_outage_seconds'] = metadata_dict.get('actual_outage_seconds', 0.0)
+                        except (json.JSONDecodeError, TypeError):
+                            event_dict['actual_outage_seconds'] = 0.0
+                    return event_dict
         except Exception as e:
             logger.error(f"Error getting last power event: {e}")
         return None

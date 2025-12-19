@@ -79,7 +79,7 @@ class Config:
     
     def __post_init__(self):
         if self.EMAIL_RECIPIENTS is None:
-            self.EMAIL_RECIPIENTS = ["clifford@tumpetech.com"]
+            self.EMAIL_RECIPIENTS = ["cliffordrh@gmail.com"]
         
         # Create directories
         self.DATA_DIR.mkdir(exist_ok=True)

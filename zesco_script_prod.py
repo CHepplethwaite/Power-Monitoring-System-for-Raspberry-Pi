@@ -34,6 +34,9 @@ from functools import wraps
 import pickle
 import csv
 import io
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env file
 
 # =========================
 # CONFIGURATION CLASS

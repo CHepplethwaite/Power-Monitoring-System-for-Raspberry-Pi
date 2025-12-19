@@ -985,7 +985,25 @@ class PowerMonitor:
         self.db_manager = DatabaseManager(self.config.DATA_DIR / self.config.DB_FILENAME)
         self.email_service = EmailService(self.config)
         self.is_service_mode = False
-    
+
+    def get_last_power_event(self) -> Optional[Dict]:
+        """Get the most recent power event from database"""
+        try:
+            with self.db_manager._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT date, time, event, uptime_seconds 
+                    FROM power_events 
+                    ORDER BY created_at DESC 
+                    LIMIT 1
+                """)
+                row = cursor.fetchone()
+                if row:
+                    return dict(row)
+        except Exception as e:
+            logger.error(f"Error getting last power event: {e}")
+        return None
+        
     def run_once(self) -> bool:
         """Run single monitoring cycle"""
         if not self.file_lock.acquire():
@@ -999,27 +1017,67 @@ class PowerMonitor:
             system_info = get_system_info()
             logger.info(f"System: {system_info['hostname']} ({system_info['ip_address']})")
             
+            
             # 2. Get current event data
             now = datetime.now()
-            uptime_seconds = get_uptime_seconds()
+            uptime_seconds = get_uptime_seconds()  # This is time since last boot
             reboot_type = detect_reboot_type()
-            
-            # 3. Check for rapid cycle
-            rapid_cycle = "YES" if uptime_seconds < self.config.RAPID_CYCLE_THRESHOLD else "NO"
-            
-            # 4. Format outage information
-            if uptime_seconds < 60:
+
+            # 3. Calculate actual outage duration by comparing with last event
+            last_event = self.get_last_power_event()
+            outage_seconds = 0.0
+
+            if last_event:
+                # Calculate time difference between now and last event
+                last_event_time = datetime.strptime(
+                    f"{last_event['date']} {last_event['time']}", 
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                time_since_last_event = (now - last_event_time).total_seconds()
+                
+                # Outage duration is time since last event minus current uptime
+                # This assumes system was down between last event and boot time
+                outage_seconds = max(0.0, time_since_last_event - uptime_seconds)
+                
+                # Check for rapid cycle based on outage duration (not uptime)
+                if outage_seconds < self.config.RAPID_CYCLE_THRESHOLD:
+                    rapid_cycle = "YES"
+                else:
+                    rapid_cycle = "NO"
+            else:
+                # First run or no previous events
+                rapid_cycle = "NO"
+                outage_seconds = 0.0  # Can't determine outage duration on first run
+
+            # 4. Format outage information for display
+            if outage_seconds < 60:
                 outage_desc = "brief blip"
-                formatted = f"{int(uptime_seconds)} seconds"
-            elif uptime_seconds < 300:
+                formatted = f"{int(outage_seconds)} seconds"
+            elif outage_seconds < 300:
                 outage_desc = "short outage"
-                formatted = f"{int(uptime_seconds // 60)} minutes"
-            elif uptime_seconds < 1800:
+                formatted = f"{int(outage_seconds // 60)} minutes"
+            elif outage_seconds < 1800:
                 outage_desc = "moderate outage"
-                formatted = f"{int(uptime_seconds // 60)} minutes"
+                minutes = int(outage_seconds // 60)
+                formatted = f"{minutes} minute{'s' if minutes != 1 else ''}"
             else:
                 outage_desc = "long outage"
-                formatted = f"{int(uptime_seconds // 3600)} hours {int((uptime_seconds % 3600) // 60)} minutes"
+                hours = int(outage_seconds // 3600)
+                minutes = int((outage_seconds % 3600) // 60)
+                if minutes == 0:
+                    formatted = f"{hours} hour{'s' if hours != 1 else ''}"
+                else:
+                    formatted = f"{hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}"
+
+            # Also format uptime for metadata
+            if uptime_seconds < 60:
+                uptime_formatted = f"{int(uptime_seconds)} seconds"
+            elif uptime_seconds < 3600:
+                uptime_formatted = f"{int(uptime_seconds // 60)} minutes"
+            else:
+                hours = int(uptime_seconds // 3600)
+                minutes = int((uptime_seconds % 3600) // 60)
+                uptime_formatted = f"{hours}h {minutes}m"
 
             event_data = {
                 "date": now.strftime("%Y-%m-%d"),
@@ -1027,11 +1085,13 @@ class PowerMonitor:
                 "event": "Power Restored",
                 "reboot_type": reboot_type,
                 "ip_address": system_info.get("ip_address"),
-                "outage_duration": formatted,
+                "outage_duration": formatted,  # Now correctly shows actual outage duration
                 "rapid_cycle": rapid_cycle,
-                "uptime_seconds": uptime_seconds,
+                "uptime_seconds": uptime_seconds,  # Time since last boot
                 "metadata": {
-                    "outage_desc": outage_desc
+                    "outage_desc": outage_desc,
+                    "uptime_formatted": uptime_formatted,
+                    "actual_outage_seconds": outage_seconds
                 }
             }
 

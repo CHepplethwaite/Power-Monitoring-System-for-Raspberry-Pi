@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environment files
+.env
+*.env
+
+# Logs
+*.log
+power_monitor.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*~
+*.bak
+*.swp
+
+# CSV data files (optional if you want to ignore historical data)
+power_restore_history.csv
+
+# Flag files
+.clean_shutdown
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.iml
+
+# Python virtual environment
+venv/
+env/

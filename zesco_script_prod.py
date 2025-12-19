@@ -54,10 +54,10 @@ class Config:
     DB_BACKUP_DIR: Path = DATA_DIR / "backups"
     
     # Email
-    SMTP_SERVER: str = "mail.tumpetech.com"
-    SMTP_PORT: int = 587
-    EMAIL_SENDER: str = "no-reply@tumpetech.com"
-    EMAIL_RECIPIENTS: List[str] = None
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = int(os.getenv("SMTP_PORT"))
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+EMAIL_RECIPIENTS = os.getenv("EMAIL_RECIPIENTS").split(",")
     
     # Monitoring
     RAPID_CYCLE_THRESHOLD: int = 300  # 5 minutes in seconds
